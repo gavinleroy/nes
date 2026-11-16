@@ -1,0 +1,11 @@
+[package]
+name = "nes-agent"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nes-agent"
+path = "src/main.rs"
+
+[dependencies]
+nes-core = { path = "../nes-core" }

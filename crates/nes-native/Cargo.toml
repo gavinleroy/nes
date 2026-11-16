@@ -1,0 +1,12 @@
+[package]
+name = "nes-native"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nes-native"
+path = "src/main.rs"
+
+[dependencies]
+nes-core = { path = "../nes-core" }
+sdl2 = { version = "0.37", features = ["use-pkgconfig"] }

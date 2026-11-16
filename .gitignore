@@ -1,0 +1,7 @@
+target/
+result
+result-*
+.claude/
+agent/
+.DS_Store
+*.nes.state

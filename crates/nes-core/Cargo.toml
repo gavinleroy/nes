@@ -1,0 +1,11 @@
+[package]
+name = "nes-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nes_core"
+
+[[bin]]
+name = "nes"
+path = "src/main.rs"
