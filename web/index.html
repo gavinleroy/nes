@@ -5,7 +5,7 @@
 <title>nes</title>
 <style>
 body { background: #111; color: #ddd; font-family: monospace; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; }
-nes-player { width: 512px; height: 480px; background: #000; }
+nes-player { width: min(95vw, 85vh * 256 / 240); aspect-ratio: 256 / 240; background: #000; }
 nes-player::part(overlay) { background: rgba(0, 0, 0, 0.7); font-size: 24px; }
 button, input { font-family: monospace; }
 #controls { display: flex; gap: 8px; align-items: center; }
@@ -19,7 +19,7 @@ button, input { font-family: monospace; }
 <button id="save">save state</button>
 <button id="load">load state</button>
 </div>
-<div>arrows move, z = A, x = B, enter = start, shift = select</div>
+<div>x = A, z = B, arrows move, enter = start, shift = select</div>
 <script type="module">
 import "./nes-player.js";
 

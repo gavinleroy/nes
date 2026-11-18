@@ -5,9 +5,11 @@ use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use std::time::Duration;
 
+const CONTROLS: &str = "x - A\nz - B\narrows - d-pad\nenter - start\nright shift - select\nr - reset\nf5 / f7 - save / load state\nf1 - this message";
+
 const BUTTONS: [(Keycode, u8); 8] = [
-    (Keycode::Z, 0x01),
-    (Keycode::X, 0x02),
+    (Keycode::X, 0x01),
+    (Keycode::Z, 0x02),
     (Keycode::RShift, 0x04),
     (Keycode::Return, 0x08),
     (Keycode::Up, 0x10),
@@ -23,9 +25,11 @@ fn main() -> Result<(), String> {
     let rom = std::fs::read(&rom_path).map_err(|e| format!("{rom_path}: {e}"))?;
     let mut nes = Nes::new(&rom)?;
     let state_path = format!("{rom_path}.state");
+    println!("{CONTROLS}");
 
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
+    video.text_input().stop();
     let window = video
         .window("nes", (WIDTH * 3) as u32, (HEIGHT * 3) as u32)
         .position_centered()
@@ -67,6 +71,14 @@ fn main() -> Result<(), String> {
                 } => match k {
                     Keycode::F5 => {
                         let _ = std::fs::write(&state_path, nes.save_state());
+                    }
+                    Keycode::F1 => {
+                        let _ = sdl2::messagebox::show_simple_message_box(
+                            sdl2::messagebox::MessageBoxFlag::INFORMATION,
+                            "controls",
+                            CONTROLS,
+                            canvas.window(),
+                        );
                     }
                     Keycode::R => nes.reset(),
                     Keycode::F7 => {

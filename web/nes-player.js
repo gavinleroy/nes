@@ -1,6 +1,39 @@
-const KEYS = { KeyZ: 0x01, KeyX: 0x02, ShiftLeft: 0x04, ShiftRight: 0x04, Enter: 0x08, ArrowUp: 0x10, ArrowDown: 0x20, ArrowLeft: 0x40, ArrowRight: 0x80 };
+const KEYS = { KeyX: 0x01, KeyZ: 0x02, ShiftLeft: 0x04, ShiftRight: 0x04, Enter: 0x08, ArrowUp: 0x10, ArrowDown: 0x20, ArrowLeft: 0x40, ArrowRight: 0x80 };
 const LEAD = 0.08;
-const MIN_LATENCY = 0.03;
+const PUMP_MS = 8;
+const PUMP_BUDGET = 6;
+
+const WORKLET_URL = URL.createObjectURL(
+  new Blob(
+    [
+      `registerProcessor("nes-audio", class extends AudioWorkletProcessor {
+        constructor() {
+          super();
+          this.queue = [];
+          this.offset = 0;
+          this.port.onmessage = e => this.queue.push(e.data);
+        }
+        process(inputs, outputs) {
+          const out = outputs[0][0];
+          let n = 0;
+          while (n < out.length && this.queue.length) {
+            const chunk = this.queue[0];
+            const take = Math.min(out.length - n, chunk.length - this.offset);
+            out.set(chunk.subarray(this.offset, this.offset + take), n);
+            n += take;
+            this.offset += take;
+            if (this.offset === chunk.length) {
+              this.queue.shift();
+              this.offset = 0;
+            }
+          }
+          return true;
+        }
+      });`,
+    ],
+    { type: "application/javascript" }
+  )
+);
 
 async function instantiate() {
   const url = new URL("nes.wasm", import.meta.url);
@@ -17,10 +50,13 @@ class NesPlayer extends HTMLElement {
   #ctx;
   #image;
   #audio = null;
-  #nextAudioTime = 0;
+  #node = null;
+  #audioStart = 0;
+  #sentSamples = 0;
   #running = false;
   #buttons = 0;
   #overlay;
+  #pump = null;
 
   constructor() {
     super();
@@ -28,16 +64,31 @@ class NesPlayer extends HTMLElement {
     root.innerHTML = `
       <style>
         :host { display: inline-block; position: relative; }
-        canvas { display: block; image-rendering: pixelated; width: 100%; height: 100%; }
+        canvas { display: block; image-rendering: pixelated; width: 100%; height: 100%; object-fit: contain; }
         div { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-        div[hidden] { display: none; }
+        [hidden] { display: none; }
+        button { position: absolute; top: 4px; right: 4px; cursor: pointer; }
+        aside { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; white-space: pre-line; }
       </style>
       <canvas part="canvas" width="256" height="240"></canvas>
-      <div part="overlay"><slot>play</slot></div>`;
+      <div part="overlay"><slot>play</slot></div>
+      <aside part="controls" hidden>x — A\nz — B\narrows — d-pad\nenter — start\nshift — select\ndouble-click — fullscreen</aside>
+      <button part="help" type="button">?</button>`;
     this.#ctx = root.querySelector("canvas").getContext("2d");
     this.#image = this.#ctx.createImageData(256, 240);
     this.#overlay = root.querySelector("div");
     this.#overlay.addEventListener("click", () => this.start());
+    const controls = root.querySelector("aside");
+    root.querySelector("button").addEventListener("click", () => {
+      controls.hidden = !controls.hidden;
+    });
+    this.addEventListener("dblclick", () => {
+      if (document.fullscreenElement === this) {
+        document.exitFullscreen();
+      } else {
+        this.requestFullscreen?.();
+      }
+    });
     this.addEventListener("keydown", e => this.#key(e, true));
     this.addEventListener("keyup", e => this.#key(e, false));
   }
@@ -75,58 +126,69 @@ class NesPlayer extends HTMLElement {
     event.preventDefault();
   }
 
-  #emulateFrame() {
-    this.#wasm.set_buttons(0, this.#buttons);
-    this.#wasm.run_frame();
-    const samples = new Float32Array(this.#wasm.memory.buffer, this.#wasm.samples_ptr(), this.#wasm.samples_len());
-    if (samples.length === 0) {
-      return;
+  #queuedSeconds() {
+    const queued = this.#sentSamples / 44100 - (this.#audio.currentTime - this.#audioStart);
+    if (queued < 0) {
+      this.#audioStart += -queued;
+      return 0;
     }
-    const buffer = this.#audio.createBuffer(1, samples.length, 44100);
-    buffer.copyToChannel(samples, 0);
-    const source = this.#audio.createBufferSource();
-    source.buffer = buffer;
-    source.connect(this.#audio.destination);
-    if (this.#nextAudioTime < this.#audio.currentTime + MIN_LATENCY) {
-      this.#nextAudioTime = this.#audio.currentTime + MIN_LATENCY;
-    }
-    source.start(this.#nextAudioTime);
-    this.#nextAudioTime += samples.length / 44100;
+    return queued;
   }
 
-  #tick = () => {
+  #emulate = () => {
     if (!this.#running) {
       return;
     }
-    let budget = 4;
-    while (budget-- > 0 && this.#nextAudioTime - this.#audio.currentTime < LEAD) {
-      this.#emulateFrame();
+    let budget = PUMP_BUDGET;
+    while (budget-- > 0 && this.#queuedSeconds() < LEAD) {
+      this.#wasm.set_buttons(0, this.#buttons);
+      this.#wasm.run_frame();
+      const samples = new Float32Array(this.#wasm.memory.buffer, this.#wasm.samples_ptr(), this.#wasm.samples_len()).slice();
+      if (samples.length > 0) {
+        this.#node.port.postMessage(samples, [samples.buffer]);
+        this.#sentSamples += samples.length;
+      }
+    }
+  };
+
+  #draw = () => {
+    if (!this.#running) {
+      return;
     }
     const pixels = new Uint8Array(this.#wasm.memory.buffer, this.#wasm.frame_ptr(), this.#wasm.frame_len() * 4);
     this.#image.data.set(pixels);
     this.#ctx.putImageData(this.#image, 0, 0);
-    requestAnimationFrame(this.#tick);
+    requestAnimationFrame(this.#draw);
   };
 
-  start() {
+  async start() {
     if (!this.#wasm || this.#running) {
       return;
     }
     if (!this.#audio) {
       this.#audio = new AudioContext({ sampleRate: 44100 });
+      await this.#audio.audioWorklet.addModule(WORKLET_URL);
+      this.#node = new AudioWorkletNode(this.#audio, "nes-audio", { outputChannelCount: [1] });
+      this.#node.connect(this.#audio.destination);
     }
-    this.#audio.resume();
-    this.#nextAudioTime = 0;
+    await this.#audio.resume();
+    this.#audioStart = this.#audio.currentTime;
+    this.#sentSamples = 0;
     this.#running = true;
     this.#overlay.hidden = true;
     this.focus();
-    requestAnimationFrame(this.#tick);
+    this.#pump = setInterval(this.#emulate, PUMP_MS);
+    requestAnimationFrame(this.#draw);
   }
 
   stop() {
     this.#running = false;
     this.#buttons = 0;
     this.#overlay.hidden = false;
+    if (this.#pump !== null) {
+      clearInterval(this.#pump);
+      this.#pump = null;
+    }
   }
 
   reset() {
