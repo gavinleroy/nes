@@ -145,8 +145,8 @@ class NesPlayer extends HTMLElement {
       this.#wasm.run_frame();
       const samples = new Float32Array(this.#wasm.memory.buffer, this.#wasm.samples_ptr(), this.#wasm.samples_len()).slice();
       if (samples.length > 0) {
-        this.#node.port.postMessage(samples, [samples.buffer]);
         this.#sentSamples += samples.length;
+        this.#node.port.postMessage(samples, [samples.buffer]);
       }
     }
   };
