@@ -57,6 +57,7 @@ class NesPlayer extends HTMLElement {
   #buttons = 0;
   #overlay;
   #pump = null;
+  #frames = 0;
 
   constructor() {
     super();
@@ -143,6 +144,7 @@ class NesPlayer extends HTMLElement {
     while (budget-- > 0 && this.#queuedSeconds() < LEAD) {
       this.#wasm.set_buttons(0, this.#buttons);
       this.#wasm.run_frame();
+      this.#frames += 1;
       const samples = new Float32Array(this.#wasm.memory.buffer, this.#wasm.samples_ptr(), this.#wasm.samples_len()).slice();
       if (samples.length > 0) {
         this.#sentSamples += samples.length;
@@ -218,6 +220,10 @@ class NesPlayer extends HTMLElement {
 
   get running() {
     return this.#running;
+  }
+
+  get frame() {
+    return this.#frames;
   }
 }
 
